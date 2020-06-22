@@ -1,0 +1,126 @@
+### 一. 拉取centos
+Docker pull centos
+
+### 二. 生成两台docker服务
+```
+1.  docker run -itd  -p800:80 -p3390:3306 --privileged --name mycentos centos /usr/sbin/init
+
+
+2.  docker run -itd  -p801:80 -p3391:3306 --privileged --name mycentos_slave centos /usr/sbin/init
+```
+
+### 三. 初始化docker,安装mysql
+
+1. Docker exec -it mycentos /bin/bash
+
+
+2. Yum install service #会遇到报错：service: command not found,解决办法见最后附注
+
+
+3. Yum install vim
+
+4. Yum install mysql
+
+5. yum install mysql-server
+
+6. Service start mysqld
+
+7. mysql默认root用户，密码默认为空
+
+8. 输入mysql命令即可进入mysql
+
+9. Select version(); #查看mysql的版本号
+
+* 从slave的docker参照上述步骤重复执行即可
+
+
+### 四. 配置主master mysql
+1 进入master docker
+Docker exec -it mycentos /bin/bash
+
+2 修改/etc/my.cnf 配置,增加如下配置
+```
+[mysqld]
+log-bin=mysql-bin
+server-id=2
+binlog-do-db=test
+```
+
+3 查看master配置
+Show master status \G;
+
+4 创建用于主从同步的用户
+create user '用户名'@'访问主机' identified by '密码’;
+create user 'slave_user'@'%' identified by '123456’;
+
+赋予权限:grant 权限列表 on 数据库 to ‘用户名’@’访问主机’ ;(修改权限时在后面加with grant option)
+grant all privileges on *.* to 'slave_user'@'%' with grant option;
+Flush privileges;
+
+
+### 五. 配置从slave mysql
+1 进入slave docker
+Docker exec -it mycentos_slave /bin/bash
+
+2 修改/etc/my.cnt配置，增加如下配置
+[mysqld]
+log-bin=mysql-bin
+server-id=3
+
+3 查看slave配置
+show slave status \G;
+
+4 搭建主从关系
+```
+change master to master_host='172.16.4.88',  
+master_port=3390,
+master_user='slave_user',
+master_password='123456', 
+master_log_file='mysql-bin.000002', 
+master_log_pos=155;
+```
+
+注意：master_host用宿主机的IP,不能用docker的IP,Docker间的IP互相不能ping通
+
+5 启动slave
+Start slave;
+
+### 六、搭建过程中出现错误，重新搭建主从流程
+1 进入slave docker
+Docker exec -it mycentos_slave /bin/bash
+
+2 停止主从关系
+Stop slave;
+
+3 重置主从配置
+Reset slave;
+
+4 重新配置搭建主从
+```
+change master to master_host='172.16.4.88',  
+master_port=3390,
+master_user='slave_user',
+master_password='123456', 
+master_log_file='mysql-bin.000002', 
+master_log_pos=155;
+```
+
+注意：master_host用宿主机的IP,不能用docker的IP,Docker间的IP互相不能ping通
+
+5 启动slave
+Start slave;
+
+
+### 七. 查看docker容器的配置信息
+1 在宿主机执行：
+Docker inspect [容器ID]
+
+2 查看容器的IP
+Docker inspect mycentos | grep IPAddress
+
+### 八. centos docker容器中”service”报错的解决办法
+1 输入 yum list | grep initscripts
+
+2 上面给出了可安装软件的yum源版本，然后执行 yum install initscripts -y
+
+3 此时service命令就可用了
